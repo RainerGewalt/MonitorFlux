@@ -64,9 +64,12 @@ async fn main() {
         start_mqtt_service(mqtt_service_clone_for_task);
     });
 
+    // Clone the config for the REST API task
+    let config_for_rest_api = (*config).clone();
+
     // Start REST API server
     let rest_api_task = tokio::spawn(async move {
-        run_rest_server(db_service).await;
+        run_rest_server(db_service, config_for_rest_api).await;
     });
 
     // Start periodic logging and updates
@@ -93,4 +96,3 @@ async fn main() {
     // Wait for tasks to complete
     let _ = tokio::join!(mqtt_service_task, rest_api_task);
 }
-

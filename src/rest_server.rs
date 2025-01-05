@@ -2,9 +2,10 @@ use rocket::serde::{json::Json, Deserialize, Serialize};
 use rocket::http::Status;
 use rocket::fairing::{Fairing, Info, Kind};
 use rocket::{get, post, routes, State};
-use rusqlite::{Result};
+use rocket::figment::Figment;
+use rusqlite::Result;
+use crate::config::Config;
 use crate::db::DatabaseService;
-
 
 /// API Request payload
 #[derive(Deserialize)]
@@ -39,9 +40,18 @@ struct LastValuesResponse {
     values: Vec<(String, String)>, // Vec<(value, timestamp)>
 }
 
+/// CORS Fairing with Config support
+pub struct Cors {
+    allowed_origins: Vec<String>,
+}
 
-/// CORS Fairing for Rocket
-pub struct Cors;
+impl Cors {
+    pub fn new(config: &Config) -> Self {
+        Self {
+            allowed_origins: config.cors_allowed_origins.clone(),
+        }
+    }
+}
 
 #[rocket::async_trait]
 impl Fairing for Cors {
@@ -52,8 +62,14 @@ impl Fairing for Cors {
         }
     }
 
-    async fn on_response<'r>(&self, _req: &'r rocket::Request<'_>, res: &mut rocket::Response<'r>) {
-        res.set_header(rocket::http::Header::new("Access-Control-Allow-Origin", "*"));
+    async fn on_response<'r>(&self, req: &'r rocket::Request<'_>, res: &mut rocket::Response<'r>) {
+        if let Some(origin) = req.headers().get_one("Origin") {
+            if self.allowed_origins.contains(&origin.to_string())
+                || self.allowed_origins.contains(&"*".to_string())
+            {
+                res.set_header(rocket::http::Header::new("Access-Control-Allow-Origin", origin));
+            }
+        }
         res.set_header(rocket::http::Header::new(
             "Access-Control-Allow-Methods",
             "GET, POST",
@@ -98,16 +114,25 @@ fn last_values(
 
 /// Root handler
 #[get("/")]
-fn root_handler() -> Json<ApiResponse> {
+fn root_handler(config: &State<Config>) -> Json<ApiResponse> {
     Json(ApiResponse {
         status: "success".to_string(),
-        message: "Welcome to the REST API!".to_string(),
+        message: format!(
+            "Welcome to the REST API running on {}:{}!",
+            config.rest_api_host, config.rest_api_port
+        ),
     })
 }
 
 /// Action handler
 #[post("/action", data = "<payload>")]
-fn action_handler(payload: Json<ApiRequest>) -> Result<Json<ApiResponse>, Status> {
+fn action_handler(payload: Json<ApiRequest>, config: &State<Config>) -> Result<Json<ApiResponse>, Status> {
+    if config.rest_api_auth_enabled {
+        return Ok(Json(ApiResponse {
+            status: "error".to_string(),
+            message: "Authentication required but not implemented.".to_string(),
+        }));
+    }
     match payload.action.as_str() {
         "ping" => Ok(Json(ApiResponse {
             status: "success".to_string(),
@@ -120,15 +145,21 @@ fn action_handler(payload: Json<ApiRequest>) -> Result<Json<ApiResponse>, Status
     }
 }
 
-/// Run the Rocket server with the provided DatabaseService
-pub async fn run_rest_server(db_service: DatabaseService) {
-    rocket::build()
+/// Run the Rocket server with the provided DatabaseService and Config
+pub async fn run_rest_server(db_service: DatabaseService, config: Config) {
+    // Clone `config` where necessary to avoid ownership issues
+    let figment = Figment::from(rocket::Config::default())
+        .merge(("address", config.rest_api_host.clone()))
+        .merge(("port", config.rest_api_port));
+
+    rocket::custom(figment)
+        .manage(config.clone()) // Clone `Config` for Rocket's managed state
         .manage(db_service)
         .mount(
             "/",
             routes![root_handler, action_handler, last_value, last_values],
         )
-        .attach(Cors)
+        .attach(Cors::new(&config)) // Use `config` reference
         .launch()
         .await
         .unwrap();
