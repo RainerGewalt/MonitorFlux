@@ -5,6 +5,8 @@ mod mqtt_service;
 mod progress_tracker;
 mod service_utils;
 mod rest_server;
+mod db;
+mod models;
 
 use crate::config::Config;
 use crate::mqtt_service::MqttService;

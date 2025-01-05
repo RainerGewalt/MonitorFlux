@@ -1,5 +1,3 @@
-#[macro_use]
-extern crate rocket;
 
 use rocket::serde::{json::Json, Deserialize, Serialize};
 use rocket::http::Status;
