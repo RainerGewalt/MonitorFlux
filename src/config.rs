@@ -62,7 +62,7 @@ impl Config {
     pub fn from_env() -> Result<Self, ConfigError> {
         dotenv().ok();
 
-        let mqtt_root_topic = env::var("MQTT_ROOT_TOPIC").unwrap_or_else(|_| "image_uploader".to_string());
+        let mqtt_root_topic = env::var("MQTT_ROOT_TOPIC").unwrap_or_else(|_| "MonitorFlux".to_string());
 
         let config = Self {
             // MQTT Configuration
