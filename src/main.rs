@@ -8,10 +8,12 @@ mod models;
 
 use crate::config::Config;
 use crate::db::DatabaseService;
-use crate::mqtt_service::MqttService;
+use crate::mqtt_service::{MqttConfig, MqttService};
 use crate::progress_tracker::SharedState;
 use crate::rest_server::run_rest_server;
-use crate::service_utils::{handle_shutdown, periodic_status_update, publish_status, start_logging, start_mqtt_service};
+use crate::service_utils::{
+    handle_shutdown, periodic_status_update, publish_status, start_logging, start_mqtt_service,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -51,48 +53,84 @@ async fn main() {
     // Shared state for progress tracking
     let state: SharedState = Arc::new(Mutex::new(HashMap::new()));
 
-    // Create MQTT service
-    let mqtt_service = MqttService::new(state.clone(), (*config).clone());
-
-    // Clone `mqtt_service` for use in tasks
-    let mqtt_service_clone_for_task = mqtt_service.clone();
-    let mqtt_service_clone_for_logging = mqtt_service.clone();
-    let mqtt_service_clone_for_status = mqtt_service.clone();
-
-    // Start MQTT service
-    let mqtt_service_task = tokio::spawn(async move {
-        start_mqtt_service(mqtt_service_clone_for_task);
+    let mqtt_service_internal = MqttService::new(state.clone(), MqttConfig {
+        mqtt_host: config.internal_mqtt_host.clone(),
+        mqtt_port: config.internal_mqtt_port,
+        mqtt_username: config.internal_mqtt_username.clone(),
+        mqtt_password: config.internal_mqtt_password.clone(),
+        mqtt_ssl_enabled: config.internal_mqtt_ssl_enabled,
+        mqtt_ssl_cert_path: config.internal_mqtt_ssl_cert_path.clone(),
+        log_topic: config.log_topic.clone(),
+        status_topic: config.status_topic.clone(),
+        command_topic: config.command_topic.clone(),
+        progress_topic: config.progress_topic.clone(),
+        analytics_topic: config.analytics_topic.clone(),
+        mqtt_max_retries: config.mqtt_max_retries,
+        mqtt_retry_interval_ms: config.mqtt_retry_interval_ms,
     });
 
-    // Clone the config for the REST API task
-    let config_for_rest_api = (*config).clone();
+    let mqtt_service_monitored = MqttService::new(state.clone(), MqttConfig {
+        mqtt_host: config.monitored_mqtt_host.clone(),
+        mqtt_port: config.monitored_mqtt_port,
+        mqtt_username: config.monitored_mqtt_username.clone(),
+        mqtt_password: config.monitored_mqtt_password.clone(),
+        mqtt_ssl_enabled: config.monitored_mqtt_ssl_enabled,
+        mqtt_ssl_cert_path: config.monitored_mqtt_ssl_cert_path.clone(),
+        log_topic: config.log_topic.clone(),
+        status_topic: config.status_topic.clone(),
+        command_topic: config.command_topic.clone(),
+        progress_topic: config.progress_topic.clone(),
+        analytics_topic: config.analytics_topic.clone(),
+        mqtt_max_retries: config.mqtt_max_retries,
+        mqtt_retry_interval_ms: config.mqtt_retry_interval_ms,
+    });
+
+
+    // Start both MQTT services
+    start_mqtt_service(mqtt_service_internal.clone(), "internal");
+    start_mqtt_service(mqtt_service_monitored.clone(), "monitored");
+
+    // Start periodic status updates for both services
+    start_logging(mqtt_service_internal.clone(), "Service is starting...".to_string());
+    periodic_status_update(mqtt_service_internal.clone(), "internal");
+
+    // Publish startup status for both services
+    publish_status(
+        mqtt_service_internal.clone(),
+        "running".to_string(),
+        Some("Internal MQTT service started successfully.".to_string()),
+    );
+
+    publish_status(
+        mqtt_service_monitored.clone(),
+        "running".to_string(),
+        Some("Monitored MQTT service started successfully.".to_string()),
+    );
 
     // Start REST API server
+    let config_for_rest_api = (*config).clone();
     let rest_api_task = tokio::spawn(async move {
         run_rest_server(db_service, config_for_rest_api).await;
     });
 
-    // Start periodic logging and updates
-    start_logging(mqtt_service_clone_for_logging, "Service is starting...".to_string());
-    periodic_status_update(mqtt_service_clone_for_status.clone());
+    // Handle shutdown for both MQTT services
+    handle_shutdown(mqtt_service_internal.clone(), "internal").await;
+    handle_shutdown(mqtt_service_monitored.clone(), "monitored").await;
 
-    // Log start status
+    // Publish shutdown status for both services
     publish_status(
-        mqtt_service.clone(),
-        "running".to_string(),
-        Some("Uploader service has started successfully.".to_string()),
+        mqtt_service_internal.clone(),
+        "shutdown".to_string(),
+        Some("Internal MQTT service is shutting down.".to_string()),
     );
 
-    // Handle shutdown
-    handle_shutdown(mqtt_service.clone()).await;
-
-    // Log shutdown status
     publish_status(
-        mqtt_service.clone(),
+        mqtt_service_monitored.clone(),
         "shutdown".to_string(),
-        Some("Uploader service is shutting down.".to_string()),
+        Some("Monitored MQTT service is shutting down.".to_string()),
     );
 
     // Wait for tasks to complete
-    let _ = tokio::join!(mqtt_service_task, rest_api_task);
+    let _ = tokio::join!(rest_api_task);
+    info!("All services shut down successfully.");
 }

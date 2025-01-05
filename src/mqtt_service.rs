@@ -5,7 +5,6 @@ use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 use log::{debug, error, info, warn};
 
-use crate::config::Config;
 use crate::db::DatabaseService;
 use crate::progress_tracker::SharedState;
 
@@ -16,16 +15,32 @@ enum ClientState {
     Connected,
     Error(String),
 }
+#[derive(Debug, Clone)]
+pub struct MqttConfig {
+    pub mqtt_host: String,
+    pub mqtt_port: u16,
+    pub mqtt_username: String,
+    pub mqtt_password: String,
+    pub mqtt_ssl_enabled: bool,
+    pub mqtt_ssl_cert_path: Option<String>,
+    pub log_topic: String,
+    pub status_topic: String,
+    pub command_topic: String,
+    pub progress_topic: String,
+    pub analytics_topic: String,
+    pub mqtt_max_retries: i32,
+    pub mqtt_retry_interval_ms: u64,
+}
 
 pub struct MqttService {
     client_state: Mutex<ClientState>,
     client: Mutex<Option<AsyncClient>>,
     state: SharedState,
-    pub config: Config,
+    pub config: MqttConfig,
 }
 
 impl MqttService {
-    pub fn new(state: SharedState, config: Config) -> Arc<Self> {
+    pub fn new(state: SharedState, config: MqttConfig) -> Arc<Self> {
         Arc::new(Self {
             client_state: Mutex::new(ClientState::Disconnected),
             client: Mutex::new(None),

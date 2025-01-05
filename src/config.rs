@@ -3,24 +3,36 @@ use serde::Deserialize;
 use std::env;
 use thiserror::Error;
 
-
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
-    pub mqtt_host: String,
-    pub mqtt_port: u16,
-    pub mqtt_username: String,
-    pub mqtt_password: String,
-    pub mqtt_ssl_enabled: bool,
-    pub mqtt_ssl_cert_path: Option<String>,
+    // Monitored MQTT Configuration
+    pub monitored_mqtt_host: String,
+    pub monitored_mqtt_port: u16,
+    pub monitored_mqtt_username: String,
+    pub monitored_mqtt_password: String,
+    pub monitored_mqtt_ssl_enabled: bool,
+    pub monitored_mqtt_ssl_cert_path: Option<String>,
+
+    // Internal MQTT Configuration
+    pub internal_mqtt_host: String,
+    pub internal_mqtt_port: u16,
+    pub internal_mqtt_username: String,
+    pub internal_mqtt_password: String,
+    pub internal_mqtt_ssl_enabled: bool,
+    pub internal_mqtt_ssl_cert_path: Option<String>,
+
+    // Shared MQTT Settings
     pub mqtt_max_retries: i32,
     pub mqtt_retry_interval_ms: u64,
 
+    // MQTT Topics
     pub log_topic: String,
     pub status_topic: String,
     pub command_topic: String,
     pub progress_topic: String,
     pub analytics_topic: String,
 
+    // REST API Configuration
     pub rest_api_host: String,
     pub rest_api_port: u16,
     pub max_api_requests_per_minute: u32,
@@ -33,7 +45,6 @@ pub struct Config {
     pub cors_enabled: bool,
     pub cors_allowed_origins: Vec<String>,
 }
-
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -65,19 +76,37 @@ impl Config {
         let mqtt_root_topic = env::var("MQTT_ROOT_TOPIC").unwrap_or_else(|_| "MonitorFlux".to_string());
 
         let config = Self {
-            // MQTT Configuration
-            mqtt_host: env::var("MQTT_HOST").map_err(|_| ConfigError::MissingOrInvalid("MQTT_HOST".to_string()))?,
-            mqtt_port: env::var("MQTT_PORT")
-                .map_err(|_| ConfigError::MissingOrInvalid("MQTT_PORT".to_string()))?
+            // Monitored MQTT Configuration
+            monitored_mqtt_host: env::var("MONITORED_MQTT_HOST")
+                .map_err(|_| ConfigError::MissingOrInvalid("MONITORED_MQTT_HOST".to_string()))?,
+            monitored_mqtt_port: env::var("MONITORED_MQTT_PORT")
+                .map_err(|_| ConfigError::MissingOrInvalid("MONITORED_MQTT_PORT".to_string()))?
                 .parse::<u16>()
-                .map_err(|_| ConfigError::ParsingError("MQTT_PORT must be a valid number".to_string()))?,
-            mqtt_username: env::var("MQTT_USERNAME").unwrap_or_default(),
-            mqtt_password: env::var("MQTT_PASSWORD").unwrap_or_default(),
-            mqtt_ssl_enabled: env::var("MQTT_SSL_ENABLED")
+                .map_err(|_| ConfigError::ParsingError("MONITORED_MQTT_PORT must be a valid number".to_string()))?,
+            monitored_mqtt_username: env::var("MONITORED_MQTT_USERNAME").unwrap_or_default(),
+            monitored_mqtt_password: env::var("MONITORED_MQTT_PASSWORD").unwrap_or_default(),
+            monitored_mqtt_ssl_enabled: env::var("MONITORED_MQTT_SSL_ENABLED")
                 .unwrap_or_else(|_| "false".to_string())
                 .parse::<bool>()
-                .map_err(|_| ConfigError::ParsingError("MQTT_SSL_ENABLED must be a boolean".to_string()))?,
-            mqtt_ssl_cert_path: env::var("MQTT_SSL_CERT_PATH").ok(),
+                .map_err(|_| ConfigError::ParsingError("MONITORED_MQTT_SSL_ENABLED must be a boolean".to_string()))?,
+            monitored_mqtt_ssl_cert_path: env::var("MONITORED_MQTT_SSL_CERT_PATH").ok(),
+
+            // Internal MQTT Configuration
+            internal_mqtt_host: env::var("INTERNAL_MQTT_HOST")
+                .map_err(|_| ConfigError::MissingOrInvalid("INTERNAL_MQTT_HOST".to_string()))?,
+            internal_mqtt_port: env::var("INTERNAL_MQTT_PORT")
+                .map_err(|_| ConfigError::MissingOrInvalid("INTERNAL_MQTT_PORT".to_string()))?
+                .parse::<u16>()
+                .map_err(|_| ConfigError::ParsingError("INTERNAL_MQTT_PORT must be a valid number".to_string()))?,
+            internal_mqtt_username: env::var("INTERNAL_MQTT_USERNAME").unwrap_or_default(),
+            internal_mqtt_password: env::var("INTERNAL_MQTT_PASSWORD").unwrap_or_default(),
+            internal_mqtt_ssl_enabled: env::var("INTERNAL_MQTT_SSL_ENABLED")
+                .unwrap_or_else(|_| "false".to_string())
+                .parse::<bool>()
+                .map_err(|_| ConfigError::ParsingError("INTERNAL_MQTT_SSL_ENABLED must be a boolean".to_string()))?,
+            internal_mqtt_ssl_cert_path: env::var("INTERNAL_MQTT_SSL_CERT_PATH").ok(),
+
+            // Shared MQTT Settings
             mqtt_max_retries: env::var("MQTT_MAX_RETRIES")
                 .unwrap_or_else(|_| "-1".to_string())
                 .parse::<i32>()
@@ -134,4 +163,3 @@ impl Config {
         Ok(config)
     }
 }
-
