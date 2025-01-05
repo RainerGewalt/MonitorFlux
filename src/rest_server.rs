@@ -1,10 +1,10 @@
-
 use rocket::serde::{json::Json, Deserialize, Serialize};
 use rocket::http::Status;
 use rocket::fairing::{Fairing, Info, Kind};
-use rocket::{get, launch, post, routes, Request};
+use rocket::{get, post, routes, State};
+use rusqlite::{Result};
+use crate::db::DatabaseService;
 
-use std::sync::Arc;
 
 /// API Request payload
 #[derive(Deserialize)]
@@ -22,6 +22,24 @@ struct ApiResponse {
     message: String,
 }
 
+/// Struct for last value response
+#[derive(Serialize)]
+#[serde(crate = "rocket::serde")]
+struct LastValueResponse {
+    topic: String,
+    value: String,
+    timestamp: String,
+}
+
+/// Struct for multiple values response
+#[derive(Serialize)]
+#[serde(crate = "rocket::serde")]
+struct LastValuesResponse {
+    topic: String,
+    values: Vec<(String, String)>, // Vec<(value, timestamp)>
+}
+
+
 /// CORS Fairing for Rocket
 pub struct Cors;
 
@@ -34,7 +52,7 @@ impl Fairing for Cors {
         }
     }
 
-    async fn on_response<'r>(&self, _req: &'r Request<'_>, res: &mut rocket::Response<'r>) {
+    async fn on_response<'r>(&self, _req: &'r rocket::Request<'_>, res: &mut rocket::Response<'r>) {
         res.set_header(rocket::http::Header::new("Access-Control-Allow-Origin", "*"));
         res.set_header(rocket::http::Header::new(
             "Access-Control-Allow-Methods",
@@ -44,6 +62,37 @@ impl Fairing for Cors {
             "Access-Control-Allow-Headers",
             "Content-Type",
         ));
+    }
+}
+
+/// Get the last value of a topic
+#[get("/topics/<topic>/last")]
+fn last_value(
+    topic: String,
+    db: &State<DatabaseService>,
+) -> Result<Json<LastValueResponse>, Status> {
+    match db.get_last_value(&topic) {
+        Ok(Some((value, timestamp))) => Ok(Json(LastValueResponse {
+            topic,
+            value,
+            timestamp,
+        })),
+        Ok(None) => Err(Status::NotFound),
+        Err(_) => Err(Status::InternalServerError),
+    }
+}
+
+/// Get the last `n` values of a topic
+#[get("/topics/<topic>/values?<limit>")]
+fn last_values(
+    topic: String,
+    limit: Option<usize>,
+    db: &State<DatabaseService>,
+) -> Result<Json<LastValuesResponse>, Status> {
+    let limit = limit.unwrap_or(10); // Default limit is 10
+    match db.get_last_values(&topic, limit) {
+        Ok(values) => Ok(Json(LastValuesResponse { topic, values })),
+        Err(_) => Err(Status::InternalServerError),
     }
 }
 
@@ -71,10 +120,16 @@ fn action_handler(payload: Json<ApiRequest>) -> Result<Json<ApiResponse>, Status
     }
 }
 
-/// Run the Rocket server
-#[launch]
-fn rocket() -> _ {
+/// Run the Rocket server with the provided DatabaseService
+pub async fn run_rest_server(db_service: DatabaseService) {
     rocket::build()
-        .mount("/", routes![root_handler, action_handler])
+        .manage(db_service)
+        .mount(
+            "/",
+            routes![root_handler, action_handler, last_value, last_values],
+        )
         .attach(Cors)
+        .launch()
+        .await
+        .unwrap();
 }

@@ -6,6 +6,7 @@ use tokio::time::{sleep, Duration};
 use log::{debug, error, info, warn};
 
 use crate::config::Config;
+use crate::db::DatabaseService;
 use crate::progress_tracker::SharedState;
 
 #[derive(Debug)]
@@ -171,26 +172,35 @@ impl MqttService {
                 let payload =
                     String::from_utf8(publish.payload.to_vec()).unwrap_or_else(|_| "".to_string());
 
-                let control_topic = self.config.command_topic.clone();
-                if topic == control_topic {
-                    debug!("Incoming control-event payload: {}", payload);
-                    // TODO: Hier die Payload weiter verarbeiten
-                } else {
-                    warn!("Unknown topic received: {}", topic);
+                match DatabaseService::new("mqtt_storage.db") {
+                    Ok(db_service) => {
+                        if let Err(e) = db_service.insert_value(&topic, &payload) {
+                            error!("Failed to insert value for topic '{}': {:?}", topic, e);
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to initialize DatabaseService: {:?}", e);
+                    }
                 }
+
             }
             Event::Incoming(Packet::ConnAck(_)) => {
                 info!("Connected to MQTT broker.");
-            }
-            Event::Outgoing(_) => {
-                debug!("Outgoing event.");
+
+                // Abonniere alle Topics
+                if let Some(client) = self.client.lock().await.as_ref() {
+                    if let Err(e) = client.subscribe("#", QoS::AtMostOnce).await {
+                        error!("Failed to subscribe to wildcard topic: {:?}", e);
+                    } else {
+                        info!("Successfully subscribed to all topics.");
+                    }
+                }
             }
             _ => {
                 debug!("Unhandled event: {:?}", event);
             }
         }
     }
-
     pub async fn publish_message(
         &self,
         topic: &str,

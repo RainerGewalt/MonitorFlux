@@ -1,5 +1,3 @@
-use rusqlite::{params, Connection, Result};
-
 #[derive(Debug)]
 pub struct Broker {
     pub id: i64,
