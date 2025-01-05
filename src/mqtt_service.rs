@@ -197,7 +197,6 @@ impl MqttService {
                         error!("Failed to initialize DatabaseService: {:?}", e);
                     }
                 }
-
             }
             Event::Incoming(Packet::ConnAck(_)) => {
                 info!("Connected to MQTT broker.");

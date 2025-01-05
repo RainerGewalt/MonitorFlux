@@ -35,7 +35,6 @@ async fn main() {
         }
     };
 
-    // Initialize the database
     let db_service = match DatabaseService::new("mqtt_storage.db") {
         Ok(service) => service,
         Err(e) => {
@@ -45,10 +44,11 @@ async fn main() {
     };
 
     if let Err(e) = db_service.initialize_db() {
-        error!("Failed to initialize database: {:?}", e);
+        error!("Database initialization failed: {:?}", e);
         return;
     }
     info!("Database initialized successfully.");
+
 
     // Shared state for progress tracking
     let state: SharedState = Arc::new(Mutex::new(HashMap::new()));
