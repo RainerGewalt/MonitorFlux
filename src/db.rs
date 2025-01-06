@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection, Result};
+use rusqlite::{params, Connection, OptionalExtension, Result};
 use std::sync::Mutex;
 use log::{error, info};
 
@@ -103,7 +103,11 @@ impl DatabaseService {
     pub fn insert_value(&self, topic: &str, value: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
 
-        let mut stmt = conn.prepare("SELECT id, max_values FROM topics WHERE topic = ?1")?;
+        let mut stmt = conn.prepare("SELECT id, max_values FROM topics WHERE topic = ?1")
+            .map_err(|e| {
+                error!("Failed to prepare SELECT query for topic '{}': {:?}", topic, e);
+                e
+            })?;
         let mut rows = stmt.query(params![topic])?;
 
         if let Some(row) = rows.next()? {
@@ -113,19 +117,27 @@ impl DatabaseService {
             conn.execute(
                 "INSERT INTO topic_values (topic_id, value) VALUES (?1, ?2)",
                 params![topic_id, value],
-            )?;
+            ).map_err(|e| {
+                error!("Failed to insert value for topic '{}': {:?}", topic, e);
+                e
+            })?;
 
             conn.execute(
                 "DELETE FROM topic_values
-                 WHERE id NOT IN (
-                     SELECT id
-                     FROM topic_values
-                     WHERE topic_id = ?1
-                     ORDER BY timestamp DESC
-                     LIMIT ?2
-                 ) AND topic_id = ?1",
+             WHERE id NOT IN (
+                 SELECT id
+                 FROM topic_values
+                 WHERE topic_id = ?1
+                 ORDER BY timestamp DESC
+                 LIMIT ?2
+             ) AND topic_id = ?1",
                 params![topic_id, max_values],
-            )?;
+            ).map_err(|e| {
+                error!("Failed to delete old values for topic '{}': {:?}", topic, e);
+                e
+            })?;
+        } else {
+            error!("Topic '{}' not found in database.", topic);
         }
         Ok(())
     }
@@ -174,5 +186,62 @@ impl DatabaseService {
             Ok(None)
         }
     }
+    /// Aktualisiert den Broker für alle Topics
+    pub fn update_broker_for_topics(&self, old_broker_name: &str, new_broker_name: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
 
+        conn.execute(
+            r#"
+            UPDATE topics
+            SET broker_id = (SELECT id FROM brokers WHERE name = ?2)
+            WHERE broker_id = (SELECT id FROM brokers WHERE name = ?1)
+            "#,
+            params![old_broker_name, new_broker_name],
+        )?;
+        Ok(())
+    }
+
+    /// Überprüft, ob ein Topic existiert und ob es noch zum aktuellen Broker gehört
+    pub fn validate_topic(&self, topic: &str, broker_name: &str) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT 1
+            FROM topics
+            WHERE topic = ?1 AND broker_id = (SELECT id FROM brokers WHERE name = ?2)
+            "#,
+        )?;
+        let exists: Option<i32> = stmt.query_row(params![topic, broker_name], |row| row.get(0)).optional()?;
+        Ok(exists.is_some())
+    }
+
+    /// Überprüft, ob ein Broker existiert, und fügt ihn hinzu, falls nicht vorhanden.
+    pub fn validate_or_add_broker(
+        &self,
+        broker_name: &str,
+        broker_host: &str,
+        broker_port: u16,
+        username: Option<&str>,
+        password: Option<&str>,
+        tls_enabled: bool,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+
+        conn.execute(
+            r#"
+            INSERT OR IGNORE INTO brokers (name, host, port, username, password, tls_enabled)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "#,
+            params![
+                broker_name,
+                broker_host,
+                broker_port,
+                username,
+                password,
+                tls_enabled
+            ],
+        )?;
+        Ok(())
+    }
 }

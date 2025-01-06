@@ -31,6 +31,9 @@ tower-http = { version = "0.6.2", features = ["limit", "cors"] }
 hyper = "1.5.2"
 reqwest = "0.12.12"
 rusqlite = "0.32.1"
+r2d2_sqlite = "0.25.0"
+r2d2 = "=0.6.0"
+
 [[bin]]
 name = "MonitorFlux"
 path = "src/main.rs"

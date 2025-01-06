@@ -36,7 +36,7 @@ async fn main() {
     };
 
     let db_service = match DatabaseService::new("mqtt_storage.db") {
-        Ok(service) => service,
+        Ok(service) => Arc::new(service),
         Err(e) => {
             error!("Failed to create database service: {:?}", e);
             return;
@@ -49,41 +49,63 @@ async fn main() {
     }
     info!("Database initialized successfully.");
 
+    // Broker für internen MQTT-Service überprüfen
+    if let Err(e) = db_service.validate_or_add_broker(
+        &config.internal_mqtt_host,
+        &config.internal_mqtt_host,
+        config.internal_mqtt_port,
+        Some(&config.internal_mqtt_username),
+        Some(&config.internal_mqtt_password),
+        config.internal_mqtt_ssl_enabled,
+    ) {
+        error!("Failed to validate internal broker: {:?}", e);
+        return;
+    }
+
+    // Brok
 
     // Shared state for progress tracking
     let state: SharedState = Arc::new(Mutex::new(HashMap::new()));
 
-    let mqtt_service_internal = MqttService::new(state.clone(), MqttConfig {
-        mqtt_host: config.internal_mqtt_host.clone(),
-        mqtt_port: config.internal_mqtt_port,
-        mqtt_username: config.internal_mqtt_username.clone(),
-        mqtt_password: config.internal_mqtt_password.clone(),
-        mqtt_ssl_enabled: config.internal_mqtt_ssl_enabled,
-        mqtt_ssl_cert_path: config.internal_mqtt_ssl_cert_path.clone(),
-        log_topic: config.log_topic.clone(),
-        status_topic: config.status_topic.clone(),
-        command_topic: config.command_topic.clone(),
-        progress_topic: config.progress_topic.clone(),
-        analytics_topic: config.analytics_topic.clone(),
-        mqtt_max_retries: config.mqtt_max_retries,
-        mqtt_retry_interval_ms: config.mqtt_retry_interval_ms,
-    });
+    let mqtt_service_internal = MqttService::new(
+        state.clone(),
+        MqttConfig {
+            mqtt_host: config.internal_mqtt_host.clone(),
+            mqtt_port: config.internal_mqtt_port,
+            mqtt_username: config.internal_mqtt_username.clone(),
+            mqtt_password: config.internal_mqtt_password.clone(),
+            mqtt_ssl_enabled: config.internal_mqtt_ssl_enabled,
+            mqtt_ssl_cert_path: config.internal_mqtt_ssl_cert_path.clone(),
+            log_topic: config.log_topic.clone(),
+            status_topic: config.status_topic.clone(),
+            command_topic: config.command_topic.clone(),
+            progress_topic: config.progress_topic.clone(),
+            analytics_topic: config.analytics_topic.clone(),
+            mqtt_max_retries: config.mqtt_max_retries,
+            mqtt_retry_interval_ms: config.mqtt_retry_interval_ms,
+        },
+        None, // Keine Datenbankoperationen für `mqtt_service_internal`
+    );
 
-    let mqtt_service_monitored = MqttService::new(state.clone(), MqttConfig {
-        mqtt_host: config.monitored_mqtt_host.clone(),
-        mqtt_port: config.monitored_mqtt_port,
-        mqtt_username: config.monitored_mqtt_username.clone(),
-        mqtt_password: config.monitored_mqtt_password.clone(),
-        mqtt_ssl_enabled: config.monitored_mqtt_ssl_enabled,
-        mqtt_ssl_cert_path: config.monitored_mqtt_ssl_cert_path.clone(),
-        log_topic: config.log_topic.clone(),
-        status_topic: config.status_topic.clone(),
-        command_topic: config.command_topic.clone(),
-        progress_topic: config.progress_topic.clone(),
-        analytics_topic: config.analytics_topic.clone(),
-        mqtt_max_retries: config.mqtt_max_retries,
-        mqtt_retry_interval_ms: config.mqtt_retry_interval_ms,
-    });
+    let mqtt_service_monitored = MqttService::new(
+        state.clone(),
+        MqttConfig {
+            mqtt_host: config.monitored_mqtt_host.clone(),
+            mqtt_port: config.monitored_mqtt_port,
+            mqtt_username: config.monitored_mqtt_username.clone(),
+            mqtt_password: config.monitored_mqtt_password.clone(),
+            mqtt_ssl_enabled: config.monitored_mqtt_ssl_enabled,
+            mqtt_ssl_cert_path: config.monitored_mqtt_ssl_cert_path.clone(),
+            log_topic: config.log_topic.clone(),
+            status_topic: config.status_topic.clone(),
+            command_topic: config.command_topic.clone(),
+            progress_topic: config.progress_topic.clone(),
+            analytics_topic: config.analytics_topic.clone(),
+            mqtt_max_retries: config.mqtt_max_retries,
+            mqtt_retry_interval_ms: config.mqtt_retry_interval_ms,
+        },
+        Some(db_service.clone()), // Datenbankoperationen für `mqtt_service_monitored`
+    );
 
 
     // Start both MQTT services

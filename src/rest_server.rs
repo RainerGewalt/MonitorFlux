@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use rocket::serde::{json::Json, Deserialize, Serialize};
 use rocket::http::Status;
 use rocket::fairing::{Fairing, Info, Kind};
@@ -146,21 +147,18 @@ fn action_handler(payload: Json<ApiRequest>, config: &State<Config>) -> Result<J
 }
 
 /// Run the Rocket server with the provided DatabaseService and Config
-pub async fn run_rest_server(db_service: DatabaseService, config: Config) {
-    // Clone `config` where necessary to avoid ownership issues
+pub async fn run_rest_server(db_service: Arc<DatabaseService>, config: Config) {
     let figment = Figment::from(rocket::Config::default())
         .merge(("address", config.rest_api_host.clone()))
         .merge(("port", config.rest_api_port));
 
     rocket::custom(figment)
-        .manage(config.clone()) // Clone `Config` for Rocket's managed state
-        .manage(db_service)
-        .mount(
-            "/",
-            routes![root_handler, action_handler, last_value, last_values],
-        )
-        .attach(Cors::new(&config)) // Use `config` reference
+        .manage(db_service.clone()) // DatabaseService korrekt registrieren
+        .manage(config.clone())    // Config korrekt registrieren
+        .mount("/", routes![root_handler, action_handler, last_value, last_values])
+        .attach(Cors::new(&config))
         .launch()
         .await
-        .unwrap();
+        .unwrap_or_else(|e| panic!("Failed to launch Rocket server: {:?}", e));
 }
+

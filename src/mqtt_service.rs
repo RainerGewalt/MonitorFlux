@@ -37,15 +37,21 @@ pub struct MqttService {
     client: Mutex<Option<AsyncClient>>,
     state: SharedState,
     pub config: MqttConfig,
+    db_service: Option<Arc<DatabaseService>>,
 }
 
 impl MqttService {
-    pub fn new(state: SharedState, config: MqttConfig) -> Arc<Self> {
+    pub fn new(
+        state: SharedState,
+        config: MqttConfig,
+        db_service: Option<Arc<DatabaseService>>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             client_state: Mutex::new(ClientState::Disconnected),
             client: Mutex::new(None),
             state,
             config,
+            db_service, // Speichern der Referenz
         })
     }
 
@@ -184,37 +190,29 @@ impl MqttService {
         match event {
             Event::Incoming(Packet::Publish(publish)) => {
                 let topic = publish.topic.clone();
-                let payload =
-                    String::from_utf8(publish.payload.to_vec()).unwrap_or_else(|_| "".to_string());
+                let payload = String::from_utf8(publish.payload.to_vec()).unwrap_or_default();
 
-                match DatabaseService::new("mqtt_storage.db") {
-                    Ok(db_service) => {
-                        if let Err(e) = db_service.insert_value(&topic, &payload) {
-                            error!("Failed to insert value for topic '{}': {:?}", topic, e);
+                // Überprüfen, ob ein db_service vorhanden ist
+                if let Some(db_service) = &self.db_service {
+                    if let Ok(valid) = db_service.validate_topic(&topic, &self.config.mqtt_host) {
+                        if valid {
+                            if let Err(e) = db_service.insert_value(&topic, &payload) {
+                                error!("Failed to insert value for topic '{}': {:?}", topic, e);
+                            }
+                        } else {
+                            warn!("Topic '{}' is not valid for the current broker.", topic);
                         }
                     }
-                    Err(e) => {
-                        error!("Failed to initialize DatabaseService: {:?}", e);
-                    }
+                } else {
+                    // Falls keine Datenbank: Nur Logging
+                    info!("Received message for topic '{}', but no database is configured.", topic);
                 }
             }
-            Event::Incoming(Packet::ConnAck(_)) => {
-                info!("Connected to MQTT broker.");
-
-                // Abonniere alle Topics
-                if let Some(client) = self.client.lock().await.as_ref() {
-                    if let Err(e) = client.subscribe("#", QoS::AtMostOnce).await {
-                        error!("Failed to subscribe to wildcard topic: {:?}", e);
-                    } else {
-                        info!("Successfully subscribed to all topics.");
-                    }
-                }
-            }
-            _ => {
-                debug!("Unhandled event: {:?}", event);
-            }
+            _ => {}
         }
     }
+
+
     pub async fn publish_message(
         &self,
         topic: &str,
